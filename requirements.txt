@@ -1,5 +1,5 @@
 flask
 flask-cors
-huggingface_hub
 python-dotenv
 openai
+gunicorn
