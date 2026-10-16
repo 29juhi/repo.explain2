@@ -4,8 +4,8 @@ import ReactMarkdown from 'react-markdown'
 import './style.css'
 
 const API_ROOT = 'https://api.github.com'
-// const EXPLAINER_API = 'https://repo-explain-api.onrender.com'
-const EXPLAINER_API = 'http://localhost:5000'
+const EXPLAINER_API = 'https://repo-explain2.onrender.com'
+// const EXPLAINER_API = 'http://localhost:5000'
 
 function parseRepositoryUrl(value) {
   const parsed = new URL(value.trim())
