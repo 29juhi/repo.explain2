@@ -1,44 +1,41 @@
-"""Generate concise code explanations with Hugging Face Inference API."""
-
-from __future__ import annotations
+"""Generate concise code explanations with an OpenAI-compatible LLM API."""
 
 import os
 from argparse import ArgumentParser
 from pathlib import Path
 
 from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
+from openai import OpenAI
 
-
-MODEL_ID = "Qwen/Qwen2.5-Coder-7B-Instruct"
 load_dotenv()
-HF_API_KEY = os.getenv("HF_API_KEY")
-client = InferenceClient(model=MODEL_ID, token=HF_API_KEY)
+
+MODEL_ID = os.getenv("LLM_MODEL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+client = OpenAI(base_url=os.getenv("LLM_BASE_URL"), api_key=LLM_API_KEY)
 
 
 def _error_message(error: Exception) -> str:
     """Convert common API failures into a useful message for the caller."""
     message = str(error).lower()
-    if "auth" in message or "token" in message or "401" in message or "403" in message:
-        return "Error: Hugging Face authentication failed. Check HF_API_KEY in .env."
+    if "402" in message or "payment required" in message or "credits" in message:
+        return "Error: AI credits exhausted. Please try again later."
+    if "api key" in message or "unauthorized" in message or "401" in message or "403" in message:
+        return "Error: Authentication failed. Check LLM_API_KEY."
     if "timeout" in message or "timed out" in message:
-        return "Error: Hugging Face request timed out. Please try again."
+        return "Error: Request timed out. Please try again."
     if "rate" in message or "429" in message:
-        return "Error: Hugging Face rate limit reached. Please try again later."
-    if "model_not_supported" in message or "not supported by any provider" in message:
-        return (
-            "Error: This model is not deployed by any Hugging Face Inference Provider. "
-            "Use a provider-supported model, run it locally with Transformers/vLLM, "
-            "or use the DeepSeek API."
-        )
-    return f"Error: Hugging Face API call failed: {error}"
+        return "Error: Rate limit reached. Please try again later."
+    if "model" in message and ("not found" in message or "does not exist" in message):
+        return "Error: Model not found. Check LLM_MODEL."
+    return f"Error: LLM API call failed: {error}"
 
 
 def explain_chunk(code: str, chunk_type: str = "function") -> str:
-    """Explain a code chunk in two or three short bullet points."""
-    if not HF_API_KEY:
-        return "Error: HF_API_KEY is missing. Add it to your .env file."
+    """Explain a code chunk in markdown."""
+    if not LLM_API_KEY:
+        return "Error: LLM_API_KEY is missing."
 
+    fence = "`````"
     prompt = f"""Provide a detailed and descriptive explanation of this {chunk_type}.
 Please include:
 - **Overall Purpose**: A clear description of what the code does.
@@ -47,11 +44,12 @@ Please include:
 Use Markdown formatting to make it easy to read. Be comprehensive but concise.
 
 Code:
-```python
+{fence}python
 {code}
-```"""
+{fence}"""
     try:
-        response = client.chat_completion(
+        response = client.chat.completions.create(
+            model=MODEL_ID,
             messages=[
                 {"role": "system", "content": "You are a helpful coding assistant. You explain code clearly, comprehensively, and use markdown formatting."},
                 {"role": "user", "content": prompt},
@@ -59,10 +57,13 @@ Code:
             max_tokens=2000,
             temperature=0.2,
         )
-        return response.choices[0].message.content.strip()
+        choice = response.choices[0]
+        text = (choice.message.content or "").strip()
+        if not text:
+            return f"Error: Model returned an empty reply (finish_reason={choice.finish_reason})."
+        return text
     except Exception as error:
         return _error_message(error)
-
 
 def get_file_context(chunks: list[dict[str, str]]) -> str:
     """Build compact file context from extracted code chunks."""
@@ -81,8 +82,8 @@ def get_file_context(chunks: list[dict[str, str]]) -> str:
 
 def summarize_file(function_names: list[str], file_context: str) -> str:
     """Summarize a file's overall purpose using a fixed template."""
-    if not HF_API_KEY:
-        return "Error: HF_API_KEY is missing. Add it to your .env file."
+    if not LLM_API_KEY:
+        return "Error: LLM_API_KEY is missing."
 
     functions = ", ".join(function_names) if function_names else "No named functions found"
     prompt = f"""You are documenting a code file for another developer.
@@ -92,7 +93,6 @@ Functions in this file: {functions}
 File context:
 {file_context}
 
-
 Fill in this exact template with your answer, nothing else:
 
 Purpose: <one line, what this file is for>
@@ -100,7 +100,8 @@ Key functions: <one line, which functions matter most and why>
 Used by: <one line, how/where this file likely gets used, or "Unclear from file alone" if you can't tell>
 """
     try:
-        response = client.chat_completion(
+        response = client.chat.completions.create(
+            model=MODEL_ID,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=120,
             temperature=0.2,
@@ -111,7 +112,7 @@ Used by: <one line, how/where this file likely gets used, or "Unclear from file 
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Explain a source file with Hugging Face.")
+    parser = ArgumentParser(description="Explain a source file with an LLM.")
     parser.add_argument("file", nargs="?", help="Path to the source file to explain")
     args = parser.parse_args()
     raw_path = args.file or input("Enter the path to a source file: ").strip()
